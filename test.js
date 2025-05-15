@@ -1,71 +1,83 @@
-const { sendInteractiveButtonsMessage, sendWhatsAppMessage } = require('./watiFunctions');
-const sessions = new Map(); // In-memory session store
+import { createClient } from '@supabase/supabase-js';
+import { generateCourseWithOpenAI } from './openai.js';
+import dotenv from 'dotenv';
+import { v4 as uuidv4 } from 'uuid';
+dotenv.config();
 
-async function testinginteractivechat(phoneNumber) {
-    // Start a new session
-    let session = {
-        state: 'start',
-        name: null,
-        gender: null
-    };
+// Hardcoded registration variables
+const reg = {
+    request_id: '8e9b41ca-5124-4b52-bea7-557ca1d219ae',
+    name: 'John Doe',
+    number: '919999999999',
+    topic: 'Classical Literature',
+    goal: 'To know about best works in classical literature and analyse them ',
+    style: 'Beginner',
+    language: 'English'
+};
 
-    // Step 1: Send "Can we begin?" interactive button
-    await sendInteractiveButtonsMessage(
-        phoneNumber,
-        "Can we begin?",
-        "Please choose an option.",
-        [
-            { type: "reply", title: "Yes", id: "yes" },
-            { type: "reply", title: "No", id: "no" }
-        ]
-    );
-    session.state = 'awaiting_begin';
-    sessions.set(phoneNumber, session);
+// Supabase setup
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Simulate user clicking "Yes"
-    let userReply = "yes";
-    if (session.state === 'awaiting_begin') {
-        if (userReply === 'no') {
-            await sendWhatsAppMessage(phoneNumber, "Ok, no worries.");
-            session.state = 'completed';
-        } else if (userReply === 'yes') {
-            await sendWhatsAppMessage(phoneNumber, "What is your name?");
-            session.state = 'awaiting_name';
+async function main() {
+    // Generate course JSON from OpenAI
+    const courseJson = await generateCourseWithOpenAI(reg);
+    console.log("Raw OpenAI response:", courseJson);
+
+    // Extract JSON between triple backticks (``` or ```json)
+    const match = courseJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    let jsonString;
+    if (match) {
+        jsonString = match[1];
+    } else {
+        // fallback: try to find the first { ... }
+        const braceMatch = courseJson.match(/\{[\s\S]*\}/);
+        jsonString = braceMatch ? braceMatch[0] : null;
+    }
+
+    if (!jsonString) {
+        console.error("No JSON object found in OpenAI response:", courseJson);
+        return;
+    }
+
+    // Parse the JSON string to an object
+    let course;
+    try {
+        course = JSON.parse(jsonString);
+    } catch (e) {
+        console.error("Failed to parse extracted JSON from OpenAI:", e, jsonString);
+        return;
+    }
+
+    // Insert each day and module into generated_courses
+    let dayNum = 1;
+    for (const dayKey of Object.keys(course)) {
+        const modules = course[dayKey];
+        const insertObj = {
+            request_id: reg.request_id,
+            day: dayNum,
+            module_1: modules[`Day ${dayNum} - Module 1`] ? modules[`Day ${dayNum} - Module 1`]["content"] : null,
+            module_2: modules[`Day ${dayNum} - Module 2`] ? modules[`Day ${dayNum} - Module 2`]["content"] : null,
+            module_3: modules[`Day ${dayNum} - Module 3`] ? modules[`Day ${dayNum} - Module 3`]["content"] : null,
+            topic_name: reg.topic
+        };
+
+        console.log(`Inserting for day ${dayNum}:`, insertObj);
+
+        const { data, error } = await supabase.from('generated_courses').insert([insertObj]).select();
+
+        if (error) {
+            console.error(`Supabase insert error on day ${dayNum}:`, error);
+            return;
+        } else {
+            console.log(`Inserted row for day ${dayNum}:`, data);
         }
-        sessions.set(phoneNumber, session);
+        dayNum++;
     }
 
-    // Simulate user entering their name
-    userReply = "Alice";
-    if (session.state === 'awaiting_name') {
-        session.name = userReply;
-        await sendInteractiveButtonsMessage(
-            phoneNumber,
-            `Hi ${session.name}, select your gender.`,
-            "Please choose an option.",
-            [
-                { type: "reply", title: "Male", id: "male" },
-                { type: "reply", title: "Female", id: "female" },
-                { type: "reply", title: "Prefer not say", id: "prefer_not_say" }
-            ]
-        );
-        session.state = 'awaiting_gender';
-        sessions.set(phoneNumber, session);
-    }
-
-    // Simulate user selecting gender
-    userReply = "female";
-    if (session.state === 'awaiting_gender') {
-        session.gender = userReply;
-        await sendWhatsAppMessage(phoneNumber, `Thank you! Name: ${session.name}, Gender: ${session.gender}`);
-        session.state = 'completed';
-        // Log all responses
-        console.log("\n--- Session Summary ---");
-        console.log("Name:", session.name);
-        console.log("Gender:", session.gender);
-        sessions.set(phoneNumber, session);
-    }
+    console.log('Course modules stored successfully in Supabase.');
 }
 
-// Call the function right away with your test number
-testinginteractivechat('919767989231');
+main();
+

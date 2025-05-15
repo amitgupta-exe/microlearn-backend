@@ -23,7 +23,7 @@ const apiVersion = "2024-12-01-preview";
 // WATI API setup
 const watiApiKey = process.env.WATI_API_TOKEN;
 const watiBaseUrl = process.env.WATI_API_URL; // e.g., "https://api.wati.io"
-
+const { generateCourseWithOpenAI } = require('./openai');
 const { sendWhatsAppMessage, sendWelcomeMessage, sendInteractiveButtonsMessage } = require('./watiFunctions'); // Import the function from watiFunctions.js
 const {
     isModuleCompletionButton,
@@ -40,6 +40,9 @@ const {
     extractUserReply
 } = require('./webhookHelperFunctions');
 
+const { handleRegistration } = require('./handleRegistration');
+const { handleCourseDelivery } = require('./handleCourseDelivery');
+
 const client = new AzureOpenAI({
     apiVersion: apiVersion,
     azureEndpoint: endpoint,
@@ -49,53 +52,6 @@ const client = new AzureOpenAI({
 // Map to store user session data
 const userSessions = new Map();
 
-// Route for handling chatbot messages from WATI
-// router.post('/chat', async (req, res) => {
-//     try {
-//         const payload = req.body;
-//         const whatsappNumber = payload.waId || payload.whatsappNumber || (payload.contact && payload.contact.wa_id);
-
-//         if (!whatsappNumber) {
-//             return res.status(400).json({ error: 'Missing WhatsApp number' });
-//         }
-
-//         // Check if this is a button press for module completion
-//         if (isModuleCompletionButton(payload)) {
-//             // This will be handled by the main webhook handler
-//             return res.status(200).json({ status: 'success' });
-//         }
-
-//         // Extract user message
-//         const userMessage = extractUserMessage(payload);
-
-//         if (!userMessage) {
-//             return res.status(400).json({ error: 'No message content found' });
-//         }
-
-//         // Get user data and course context
-//         const userData = await getUserData(whatsappNumber);
-
-//         if (!userData) {
-//             // If user not found in database, could be a new user or error
-//             await sendWhatsAppMessage(whatsappNumber, "I don't seem to have your course information. If you're interested in taking a course, please start by telling me your name.");
-//             return res.status(200).json({ status: 'success' });
-//         }
-
-//         // Handle the message based on context
-//         await handleUserMessage(whatsappNumber, userMessage, userData);
-
-//         // Record the question/response in database
-//         await recordUserInteraction(whatsappNumber, userMessage, 'question');
-
-//         // Respond to WATI webhook
-//         res.status(200).json({ status: 'success' });
-
-//     } catch (error) {
-//         console.error('Chatbot error:', error);
-//         res.status(500).json({ error: 'Internal server error' });
-//     }
-// });
-
 app.post('/wati-webhook', async (req, res) => {
     try {
         const payload = req.body;
@@ -103,21 +59,14 @@ app.post('/wati-webhook', async (req, res) => {
         const text = extractUserReply(payload);
 
         if (!phoneNumber) return res.status(400).json({ error: 'Missing WhatsApp number' });
-
-        if (!text) {
-            // Ignore empty or unrecognized input
-            return res.status(200).json({ status: 'ignored' });
-        }
+        if (!text) return res.status(200).json({ status: 'ignored' });
 
         // Initialize session if not present
-        if (!userSessions.has(phoneNumber)) {
-            userSessions.set(phoneNumber, {});
-        }
+        if (!userSessions.has(phoneNumber)) userSessions.set(phoneNumber, {});
         const session = userSessions.get(phoneNumber);
 
-        // FLOW LOGIC
-        if (text === 'microlearn') {
-            // await sendWhatsAppMessage(phoneNumber, "Welcome to microlearn, microlearn is a platform to consume knowledge in bite sized modules");
+        // Registration flow trigger
+        if (text.toLowerCase() === 'microlearn') {
             await sendInteractiveButtonsMessage(
                 phoneNumber,
                 "Can we begin?",
@@ -131,81 +80,125 @@ app.post('/wati-webhook', async (req, res) => {
             return res.status(200).json({ status: 'success' });
         }
 
-        else if (session.state === 'awaiting_begin') {
-            if (text === 'maybe next time') {
+        // Begin registration if user says yes
+        if (session.state === 'awaiting_begin') {
+            if (text.toLowerCase() === 'maybe next time') {
                 await sendWhatsAppMessage(phoneNumber, "No worries I am always here, awake me with the mantra microlearn!!");
                 session.state = null;
-            } else if (text === 'yes') {
-                await sendWhatsAppMessage(phoneNumber, "Please enter your name");
-                session.state = 'awaiting_name';
+                return res.status(200).json({ status: 'success' });
+            } else if (text.toLowerCase() === 'yes') {
+                session.state = 'registration';
+                session.registration = {};
+                await handleRegistration(phoneNumber, session, userSessions, sendWhatsAppMessage, sendInteractiveButtonsMessage, supabase, client);
+                return res.status(200).json({ status: 'success' });
             }
-            return res.status(200).json({ status: 'success' });
         }
 
-        else if (session.state === 'awaiting_name') {
-            session.name = text;
-            await sendWhatsAppMessage(phoneNumber, `Hi ${session.name}, what topic do you want to explore?`);
-            session.state = 'awaiting_topic';
-            return res.status(200).json({ status: 'success' });
-        }
-
-        else if (session.state === 'awaiting_topic') {
-            session.topic = text;
-            await sendWhatsAppMessage(phoneNumber, `What goal do you want to achieve?`);
-            session.state = 'awaiting_goal';
-            return res.status(200).json({ status: 'success' });
-        }
-
-        else if (session.state === 'awaiting_goal') {
-            session.goal = text;
-            await sendInteractiveButtonsMessage(
+        // Continue registration flow
+        if (session.state === 'registration') {
+            const result = await handleRegistration(
                 phoneNumber,
-                "Choose your learning style",
-                "choose a style",
-                [
-                    { type: "reply", title: "Beginner", id: "beginner" },
-                    { type: "reply", title: "Advanced", id: "advanced" },
-                    { type: "reply", title: "Professional", id: "professional" }
-                ]
+                session,
+                userSessions,
+                sendWhatsAppMessage,
+                sendInteractiveButtonsMessage,
+                supabase,
+                client,
+                text
             );
-            session.state = 'awaiting_style';
+
+            // If registration is completed, generate and store the course
+            if (result && result.completed && result.reg) {
+                // Store registration in Supabase
+                await supabase.from('registration_requests').insert([{
+                    request_id: result.reg.request_id,
+                    name: result.reg.name,
+                    number: phoneNumber,
+                    topic: result.reg.topic,
+                    goal: result.reg.goal,
+                    style: result.reg.style,
+                    language: result.reg.language,
+                    generated: false
+                }]);
+
+                // Generate course JSON from OpenAI
+                const courseJson = await generateCourseWithOpenAI(result.reg);
+                console.log("Raw OpenAI response:", courseJson);
+
+                // Extract JSON between triple backticks (``` or ```json)
+                const match = courseJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+                let jsonString;
+                if (match) {
+                    jsonString = match[1];
+                } else {
+                    // fallback: try to find the first { ... }
+                    const braceMatch = courseJson.match(/\{[\s\S]*\}/);
+                    jsonString = braceMatch ? braceMatch[0] : null;
+                }
+
+                if (!jsonString) {
+                    console.error("No JSON object found in OpenAI response:", courseJson);
+                    return;
+                }
+
+                // Parse the JSON string to an object
+                let course;
+                try {
+                    course = JSON.parse(jsonString);
+                } catch (e) {
+                    console.error("Failed to parse extracted JSON from OpenAI:", e, jsonString);
+                    return;
+                }
+
+                // Insert each day and module into generated_courses
+                let dayNum = 1;
+                for (const dayKey of Object.keys(course)) {
+                    const modules = course[dayKey];
+                    const insertObj = {
+                        request_id: result.reg.request_id,
+                        day: dayNum,
+                        module_1: modules[`Day ${dayNum} - Module 1`] ? modules[`Day ${dayNum} - Module 1`]["content"] : null,
+                        module_2: modules[`Day ${dayNum} - Module 2`] ? modules[`Day ${dayNum} - Module 2`]["content"] : null,
+                        module_3: modules[`Day ${dayNum} - Module 3`] ? modules[`Day ${dayNum} - Module 3`]["content"] : null,
+                        topic_name: result.reg.topic
+                    };
+
+                    console.log(`Inserting for day ${dayNum}:`, insertObj);
+
+                    const { data, error } = await supabase.from('generated_courses').insert([insertObj]).select();
+
+                    if (error) {
+                        console.error(`Supabase insert error on day ${dayNum}:`, error);
+                        return;
+                    } else {
+                        console.log(`Inserted row for day ${dayNum}:`, data);
+                    }
+                    dayNum++;
+                }
+
+                console.log('Course modules stored successfully in Supabase.');
+
+                // Mark registration as generated
+                await supabase.from('registration_requests')
+                    .update({ generated: true })
+                    .eq('request_id', result.reg.request_id);
+
+                // Start course delivery
+                session.state = `course_delivery_day_1_module_1`;
+                session.courseDay = 1;
+                session.courseModule = 1;
+                await sendWhatsAppMessage(phoneNumber, `Your course is ready! Type 'next' to begin your first module.`);
+            }
+
             return res.status(200).json({ status: 'success' });
         }
 
-        else if (session.state === 'awaiting_style') {
-            session.style = text;
-            await sendInteractiveButtonsMessage(
-                phoneNumber,
-                "Choose your preferred language",
-                "choose a language",
-                [
-                    { type: "reply", title: "English", id: "english" },
-                    { type: "reply", title: "Hindi", id: "hindi" },
-                    { type: "reply", title: "Marathi", id: "marathi" }
-                ]
-            );
-            session.state = 'awaiting_language';
+        // Course delivery flow
+        if (session.state && session.state.startsWith('course_delivery')) {
+            await handleCourseDelivery(phoneNumber, session, userSessions, sendWhatsAppMessage, sendInteractiveButtonsMessage, supabase, text);
             return res.status(200).json({ status: 'success' });
         }
 
-        else if (session.state === 'awaiting_language') {
-            session.language = text;
-            await sendWhatsAppMessage(phoneNumber, `Thank you! We'll use this info to personalize your learning journey.`);
-            session.state = null; // End of flow
-
-            // Log all responses at the end of the flow
-            console.log("\n--- Session Summary ---");
-            console.log("Name:", session.name);
-            console.log("Topic:", session.topic);
-            console.log("Goal:", session.goal);
-            console.log("Learning Style:", session.style);
-            console.log("Language:", session.language);
-
-            // Here you can later add code to store session in Supabase
-            return res.status(200).json({ status: 'success' });
-        }
-
-        // Default fallback
         res.status(200).json({ status: 'ignored' });
     } catch (error) {
         console.error('Webhook error:', error);
