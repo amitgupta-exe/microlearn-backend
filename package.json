@@ -1,0 +1,32 @@
+{
+  "name": "alfred-webhook",
+  "version": "1.0.0",
+  "description": "Webhook service connecting Wati chatbot with Supabase for the Alfred learning assistant",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "webhook",
+    "wati",
+    "supabase",
+    "chatbot",
+    "whatsapp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@azure/identity": "^4.9.1",
+    "@supabase/supabase-js": "^2.39.3",
+    "axios": "^1.9.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "openai": "^4.97.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
