@@ -36,6 +36,16 @@ const client = new AzureOpenAI({
 const userSessions = new Map();
 
 
+function normalizePhoneNumber(number) {
+    if (!number) return '';
+    number = number.toString().replace(/[\s\-+]/g, '');
+    if (number.startsWith('0')) number = '91' + number.slice(1);
+    if (number.length === 10) number = '91' + number;
+    return number;
+}
+
+
+
 //made to handle session problem of sending rapid sequent messagees without waiting. the issue is because the payload for interactive message is in different format
 function extractUserReply(payload) {
     // WATI interactive button reply (common)
@@ -70,5 +80,5 @@ function extractUserReply(payload) {
 
 module.exports = {
 
-    extractUserReply
+    extractUserReply, normalizePhoneNumber
 };

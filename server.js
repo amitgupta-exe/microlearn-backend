@@ -25,20 +25,7 @@ const watiApiKey = process.env.WATI_API_TOKEN;
 const watiBaseUrl = process.env.WATI_API_URL; // e.g., "https://api.wati.io"
 const { generateCourseWithOpenAI } = require('./openai');
 const { sendWhatsAppMessage, sendWelcomeMessage, sendInteractiveButtonsMessage } = require('./watiFunctions'); // Import the function from watiFunctions.js
-const {
-    isModuleCompletionButton,
-    extractUserMessage,
-    getUserData,
-    handleUserMessage,
-    recordUserInteraction,
-    handleModuleCompletion,
-    extractVariableName,
-    extractVariableValue,
-    generateCourse,
-    sendNextModule,
-
-    extractUserReply
-} = require('./webhookHelperFunctions');
+const { extractUserReply, normalizePhoneNumber } = require('./webhookHelperFunctions');
 
 const { handleRegistration } = require('./handleRegistration');
 const { handleCourseDelivery } = require('./handleCourseDelivery');
@@ -145,33 +132,42 @@ app.post('/wati-webhook', async (req, res) => {
 
                 if (!jsonString) {
                     console.error("No JSON object found in OpenAI response:", courseJson);
-                    return;
+                    // Inform the user and WATI
+                    await sendWhatsAppMessage(phoneNumber, "Sorry, I couldn't generate the course content structure right now. Please try again later.");
+                    return res.status(200).json({ status: 'error', message: 'Failed to extract course JSON from AI response.' });
                 }
 
                 // Parse the JSON string to an object
                 let course;
                 try {
+                    // Trim whitespace just in case the regex included some
+                    jsonString = jsonString.trim();
                     course = JSON.parse(jsonString);
                 } catch (e) {
-                    console.error("Failed to parse extracted JSON from OpenAI:", e, jsonString);
-                    return;
+                    console.error("Failed to parse extracted JSON from OpenAI:", e, "Original jsonString snippet:", jsonString.substring(0, 500));
+                    // Inform the user and WATI
+                    await sendWhatsAppMessage(phoneNumber, "Sorry, there was an issue processing the course content format. Please try again later or contact support.");
+                    return res.status(200).json({ status: 'error', message: 'Failed to parse course JSON.' });
                 }
 
                 // Insert each day and module into generated_courses
-                let firstCourseId = null;
+                let firstCourseId = null; // Initialize to ensure it's defined
                 let dayNum = 1;
                 for (const dayKey of Object.keys(course)) {
                     const modules = course[dayKey];
                     const insertObj = {
+                        id: 'xxx',
                         request_id: result.reg.request_id,
+                        course_name: result.reg.topic,
+                        visibility: "public",
+                        origin: "alfred",
                         day: dayNum,
                         module_1: modules[`Day ${dayNum} - Module 1`] ? modules[`Day ${dayNum} - Module 1`]["content"] : null,
                         module_2: modules[`Day ${dayNum} - Module 2`] ? modules[`Day ${dayNum} - Module 2`]["content"] : null,
                         module_3: modules[`Day ${dayNum} - Module 3`] ? modules[`Day ${dayNum} - Module 3`]["content"] : null,
-                        topic_name: result.reg.topic
                     };
 
-                    const { data, error } = await supabase.from('generated_courses').insert([insertObj]).select();
+                    const { data, error } = await supabase.from('courses').insert([insertObj]).select();
                     if (error) {
                         console.error(`Supabase insert error on day ${dayNum}:`, error);
                         return;
@@ -191,14 +187,15 @@ app.post('/wati-webhook', async (req, res) => {
                     .eq('request_id', result.reg.request_id);
 
                 // Insert a row in course_progress
-                await supabase.from('course_progress').upsert([{ // Changed to upsert
+                await supabase.from('course_progress').insert([{ // Changed to upsert
                     learner_id: result.reg.request_id,
                     learner_name: result.reg.name,
                     course_id: firstCourseId, // Ensure firstCourseId is correctly obtained
                     course_name: result.reg.topic,
                     status: 'notstarted',
                     current_day: 1,
-                    phone_number: phoneNumber
+                    phone_number: phoneNumber,
+                    last_module_completed_at: new Date()
                 }], { onConflict: 'phone_number', ignoreDuplicates: false }); // Specify onConflict strategy
 
 
@@ -226,111 +223,148 @@ app.post('/wati-webhook', async (req, res) => {
 
         // --- Stateless Course Delivery Flow ---
 
-        // Handle "Start Learning" text command (keep if needed, but button is primary)
-        if (text && text.trim().toLowerCase() === 'start learning') {
-            console.log(`[Webhook] 'start learning' text received for ${phoneNumber}`);
-            // It's better to rely on the button click, but if text is a fallback:
-            // Ensure a course_progress entry exists before calling handleCourseDelivery
+        // // Handle "Start Learning" text command (keep if needed, but button is primary)
+        // if (text && text.trim().toLowerCase() === 'start learning') {
+        //     console.log(`[Webhook] 'start learning' text received for ${phoneNumber}`);
+        //     // It's better to rely on the button click, but if text is a fallback:
+        //     // Ensure a course_progress entry exists before calling handleCourseDelivery
+        //     const { data: progressEntry, error: progressError } = await supabase
+        //         .from('course_progress')
+        //         .select('*')
+        //         .eq('phone_number', phoneNumber)
+        //         .in('status', ['assigned', 'started'])
+        //         .maybeSingle()
+
+        //     console.log(progressEntry);
+        //     console.log(progressError);
+
+
+
+        //     if (progressEntry) {
+        //         if (progressEntry.status === 'assigned') {
+        //             await supabase.from('course_progress')
+        //                 .update({ status: 'started', started_at: new Date() })
+        //                 .eq('phone_number', phoneNumber);
+        //         }
+        //         await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage);
+        //         return res.status(200).json({ status: 'success', message: 'Course delivery triggered by text.' });
+        //     } else {
+        //         await sendWhatsAppMessage(phoneNumber, "It seems you're not registered for a course yet. Type 'microlearn' to begin.");
+        //         return res.status(200).json({ status: 'info', message: 'No course progress found for text command.' });
+        //     }
+        // }
+
+        // Handle "Start Learning" button click
+        if (payload.button_reply && payload.button_reply.id === 'start_learning' || text && text.trim().toLowerCase() === 'start learning') { // This seems to be for a different button type from WATI
+            console.log(`[Webhook] 'start_learning' button clicked/text recieved for ${phoneNumber}`);
+            // Fetch progress entry
             const { data: progressEntry, error: progressError } = await supabase
                 .from('course_progress')
                 .select('status')
                 .eq('phone_number', phoneNumber)
+                .in('status', ['assigned', 'started'])
                 .maybeSingle();
 
-            if (progressEntry) {
-                 if (progressEntry.status === 'notstarted') {
-                    await supabase.from('course_progress')
-                        .update({ status: 'started', started_at: new Date() })
-                        .eq('phone_number', phoneNumber);
-                }
-                await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage);
-                return res.status(200).json({ status: 'success', message: 'Course delivery triggered by text.' });
-            } else {
+            if (progressError || !progressEntry) {
                 await sendWhatsAppMessage(phoneNumber, "It seems you're not registered for a course yet. Type 'microlearn' to begin.");
-                return res.status(200).json({ status: 'info', message: 'No course progress found for text command.' });
+                return res.status(200).json({ status: 'info', message: 'No course progress found.' });
             }
-        }
 
-        // Handle "Start Learning" button click
-        if (payload.button_reply && payload.button_reply.id === 'start_learning') { // This seems to be for a different button type from WATI
-            console.log(`[Webhook] 'start_learning' button clicked for ${phoneNumber}`);
-            const { error: updateError } = await supabase.from('course_progress')
-                .update({ status: 'started', started_at: new Date() })
-                .eq('phone_number', phoneNumber);
+            if (['completed', 'suspended'].includes(progressEntry.status)) {
+                await sendWhatsAppMessage(phoneNumber, "Your course is already completed or suspended.");
+                return res.status(200).json({ status: 'info', message: 'Course already completed or suspended.' });
+            }
 
-            if (updateError) {
-                 console.error(`[Webhook] Error updating status to 'started' for ${phoneNumber}:`, updateError);
+            // If status is 'assigned', update to 'started'
+            if (progressEntry.status === 'assigned') {
+                const { error: updateError } = await supabase.from('course_progress')
+                    .update({ status: 'started', started_at: new Date() })
+                    .eq('phone_number', phoneNumber);
+                if (updateError) {
+                    console.error(`[Webhook] Error updating status to 'started' for ${phoneNumber}:`, updateError);
+                }
             }
 
             await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage);
             return res.status(200).json({ status: 'success', message: 'Course started.' });
         }
 
-        // Handle module completion from "Done" button click (using interactiveButtonReply)
-        if (payload.interactiveButtonReply && payload.interactiveButtonReply.title && payload.interactiveButtonReply.title.toLowerCase() === 'done') {
-            console.log(`[Webhook] 'Done' button clicked. User's phone (from payload): ${phoneNumber}`);
+        // Handle module completion from "Done" button click (using interactiveButtonReply or button_reply)
+        const doneButton =
+            (text && text.trim().toLowerCase() === 'done') ||
+            (payload.interactiveButtonReply && payload.interactiveButtonReply.title && payload.interactiveButtonReply.title.toLowerCase() === 'done' && payload.interactiveButtonReply) ||
+            (payload.button_reply && payload.button_reply.title && payload.button_reply.title.toLowerCase() === 'done' && payload.button_reply);
 
-            // 1. Fetch current progress
-            const { data: progressEntry, error: progressFetchError } = await supabase
+        if (doneButton) {
+            // Fetch the user's progress to infer which module is next
+            const { data: progressEntry, error: progressError } = await supabase
                 .from('course_progress')
                 .select('*')
-                .eq('phone_number', phoneNumber) // Using the phoneNumber from payload
+                .eq('phone_number', phoneNumber)
+                .in('status', ['assigned', 'started'])
                 .maybeSingle();
 
-            if (progressFetchError) {
-                console.error(`[Webhook] Supabase error fetching progress for ${phoneNumber}:`, progressFetchError);
-                return res.status(200).json({ status: 'error', message: 'Error fetching progress.' });
+            if (progressError || !progressEntry) {
+                console.error(`[Webhook] Could not fetch progress for ${phoneNumber}:`, progressError);
+                return res.status(500).json({ status: 'error', message: 'Could not fetch progress.' });
             }
-            if (!progressEntry) {
-                console.error(`[Webhook] No progress entry found in DB for ${phoneNumber}. Cannot determine which module was 'Done'.`);
-                // This could happen if the phone number format in DB is different or record deleted.
-                await sendWhatsAppMessage(phoneNumber, "I couldn't find your course progress. Please try 'start learning' again or contact support.");
-                return res.status(200).json({ status: 'error', message: 'No progress found.' });
-            }
-            console.log(`[Webhook] Fetched progressEntry for ${phoneNumber}:`, JSON.stringify(progressEntry));
-
 
             const current_day = progressEntry.current_day;
-            // 2. Determine which module was just completed
-            // This should be the first module for current_day that is NOT true
-            let completedModuleNum = [1, 2, 3].find(i => !progressEntry[`day${current_day}_module${i}`]);
+            // Find the first incomplete module for the current day
+            const nextModuleIdx = [1, 2, 3].find(i => !progressEntry[`day${current_day}_module${i}`]);
 
-            if (completedModuleNum === undefined) {
-                console.warn(`[Webhook] 'Done' clicked for ${phoneNumber}, but all modules for Day ${current_day} seem to be already completed. Progress: ${JSON.stringify(progressEntry)}`);
-                await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage); // Let handleCourseDelivery decide (e.g., send "Day complete")
-                return res.status(200).json({ status: 'success', message: 'All modules for the day might be complete.' });
+            if (!nextModuleIdx) {
+                // All modules are already complete, nothing to do
+                await sendWhatsAppMessage(phoneNumber, "All modules for today are already complete.");
+                return res.status(200).json({ status: 'success', message: 'All modules already complete.' });
             }
 
-            console.log(`[Webhook] Inferred module to mark as complete: Day ${current_day}, Module ${completedModuleNum} for ${phoneNumber}`);
+            // Mark this module as done and update last_module_completed_at
+            const updateObj = {};
+            updateObj[`day${current_day}_module${nextModuleIdx}`] = true;
+            updateObj.last_module_completed_at = new Date();
 
-            // 3. Prepare and attempt the update
-            const fieldToUpdate = `day${current_day}_module${completedModuleNum}`;
-            const updatePayload = { [fieldToUpdate]: true, last_module_completed_at: new Date() };
-
-            console.log(`[Webhook] Attempting to update 'course_progress' for phone_number: "${phoneNumber}" with payload: ${JSON.stringify(updatePayload)}`);
-
-            const { data: updateData, error: updateError } = await supabase.from('course_progress')
-                .update(updatePayload)
-                .eq('phone_number', phoneNumber) // CRITICAL: This phoneNumber must exactly match the one in DB
-                .select(); // .select() will return the updated row(s)
-
-            if (updateError) {
-                console.error(`[Webhook] Supabase UPDATE error for ${phoneNumber}, field ${fieldToUpdate}:`, updateError);
-                // Inform user or log, but don't necessarily stop the flow if handleCourseDelivery can still run
-            } else {
-                console.log(`[Webhook] Supabase UPDATE result for ${phoneNumber}, field ${fieldToUpdate}. Affected rows data: ${JSON.stringify(updateData)}`);
-                if (!updateData || updateData.length === 0) {
-                    console.error(`[Webhook] CRITICAL: Update for phone_number "${phoneNumber}" (field ${fieldToUpdate}) did NOT affect any rows. This means the phone_number in the .eq() clause did not match any record in the course_progress table. Please verify the phone number format and existence in your database.`);
+            // If this is the last module (module 3), also increment current_day
+            if (nextModuleIdx === 3) {
+                // If this is the last module of the last day, mark as completed
+                if (current_day === 3) {
+                    updateObj.status = 'completed';
                 } else {
-                    console.log(`[Webhook] Successfully updated ${fieldToUpdate} for ${phoneNumber}. Updated row count: ${updateData.length}. First updated row: ${JSON.stringify(updateData[0])}`);
+                    updateObj.current_day = current_day + 1;
                 }
             }
+            const { error: updateError } = await supabase
+                .from('course_progress')
+                .update(updateObj)
+                .eq('phone_number', phoneNumber);
 
-            // 4. Call handleCourseDelivery regardless of update success to send next step
-            // handleCourseDelivery will fetch the (hopefully) updated state from DB
-            console.log(`[Webhook] Calling handleCourseDelivery for ${phoneNumber} after attempting module completion.`);
-            await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage);
-            return res.status(200).json({ status: 'success', message: 'Module completion processed.' });
+            if (updateError) {
+                console.error(`[Webhook] Error updating progress for ${phoneNumber}:`, updateError);
+                return res.status(500).json({ status: 'error', message: 'Failed to update progress.' });
+            }
+
+            if (nextModuleIdx === 3) {
+                // Send outro and STOP (do not send next module)
+                if (current_day === 3) {
+                    // Final outro for course completion
+                    await sendWhatsAppMessage(
+                        phoneNumber,
+                        `🎉 Congratulations! You have completed your course. You'll receive your certificate shortly.`
+                    );
+                    return res.status(200).json({ status: 'success', message: 'Course completed, outro sent.' });
+                } else {
+                    // Outro for day completion
+                    await sendWhatsAppMessage(
+                        phoneNumber,
+                        `🎉 Congratulations! You have completed all modules for Day ${current_day}. You'll get your next set of modules soon.`
+                    );
+                    return res.status(200).json({ status: 'success', message: 'Day completed, outro sent.' });
+                }
+            } else {
+                // For modules 1 and 2, fetch fresh progress and send the next module
+                await handleCourseDelivery(phoneNumber, supabase, sendInteractiveButtonsMessage, sendWhatsAppMessage);
+                return res.status(200).json({ status: 'success', message: 'Module marked as done.' });
+            }
         }
 
         // Fallback for unrecognized button clicks or text messages if session.state is not active

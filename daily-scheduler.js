@@ -1,209 +1,107 @@
 // daily-scheduler.js - Run as a cron job at 10 AM daily
+require('dotenv').config(); // Ensure .env variables are loaded
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
-const fetch = require('node-fetch');
+const { sendWhatsAppMessage, sendInteractiveButtonsMessage } = require('./watiFunctions');
 
 // Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY; // Corrected to SERVICE_KEY
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// WATI API setup
-const watiApiKey = process.env.WATI_API_KEY;
-const watiBaseUrl = process.env.WATI_BASE_URL; // e.g., "https://api.wati.io"
+const MAX_COURSE_DAYS = 3;
+const NEXT_DAY_START_HOUR = 10; // 10 AM server time
 
-// Schedule task to run at 10 AM every day
-cron.schedule('0 10 * * *', async () => {
-  console.log('Running daily course scheduler at 10 AM');
-  await sendDailyModules();
+// --- Core Scheduler Logic ---
+
+async function advanceOrRemindUsersByTimestamp() {
+  console.log('[Scheduler] advanceOrRemindUsersByTimestamp: Task started.');
+  const now = new Date();
+  const todayAtStartHour = new Date(now);
+  todayAtStartHour.setHours(NEXT_DAY_START_HOUR, 0, 0, 0);
+
+  // Fetch users who are 'started'
+  console.log(`[Scheduler] Fetching users with status='started'.`);
+  const { data: usersInProgress, error } = await supabase
+    .from('course_progress')
+    .select('*')
+    .in('status', ['assigned', 'started']);
+
+    console.log(usersInProgress);
+    
+
+  if (error) {
+    console.error('[Scheduler] Supabase error fetching users:', error);
+    return;
+  }
+
+  if (!usersInProgress || usersInProgress.length === 0) {
+    console.log('[Scheduler] No users found with status=\'started or assigned\'.');
+    return;
+  }
+
+  console.log(`[Scheduler] Found ${usersInProgress.length} user(s) to process.`);
+
+  for (const user of usersInProgress) {
+    const current_day = user.current_day;
+
+    // Restrict current_day to MAX_COURSE_DAYS
+    if (current_day > MAX_COURSE_DAYS) {
+      continue;
+    }
+
+    const m1 = !!user[`day${current_day}_module1`];
+    const m2 = !!user[`day${current_day}_module2`];
+    const m3 = !!user[`day${current_day}_module3`];
+    const completedCount = [m1, m2, m3].filter(Boolean).length;
+
+    // If on last day and all modules complete, mark as completed and stop
+    if (current_day === MAX_COURSE_DAYS && completedCount === 3 && user.status !== 'completed') {
+      await supabase
+        .from('course_progress')
+        .update({ status: 'completed' })
+        .eq('phone_number', user.phone_number);
+      await sendWhatsAppMessage(
+        user.phone_number,
+        `🎉 Congratulations! You have completed your course. You'll receive your certificate shortly.`
+      );
+      continue;
+    }
+
+    await sendInteractiveButtonsMessage(
+      user.phone_number,
+      `You're doing great!`,
+      `You have completed ${completedCount} module(s) for Day ${current_day} .Press Start Learning to continue.`,
+      [{ type: "reply", title: "Start Learning", id: "start_learning" }]
+    );
+  }
+}
+
+// Main scheduler function to be called by cron
+async function runScheduledTasks() {
+  console.log(`[Scheduler] Running tasks at ${new Date().toISOString()}`);
+  try {
+    await advanceOrRemindUsersByTimestamp();
+  } catch (e) {
+    console.error('[Scheduler] Error in runScheduledTasks:', e);
+  }
+  console.log(`[Scheduler] Tasks completed at ${new Date().toISOString()}`);
+}
+
+// Schedule task to run every minute
+cron.schedule('* * * * *', () => {
+  console.log('[Scheduler] Cron job triggered (every minute).');
+  runScheduledTasks();
 });
 
-// Main function to send modules for the day
-async function sendDailyModules() {
-  try {
-    // Get all active users who completed a day but haven't completed the course
-    const { data: activeUsers, error } = await supabase
-      .from('user_inputs')
-      .select('Phone, Name, Topic, Day_Completed, Next_Module, Course_Completed')
-      .eq('Course_Completed', false)
-      .not('Next_Module', 'is', null)
-      .not('Day_Completed', 'is', null);
-      
-    if (error) {
-      console.error('Error fetching active users:', error);
-      return;
-    }
-    
-    console.log(`Found ${activeUsers?.length || 0} active users to process`);
-    
-    // Process each user
-    for (const user of (activeUsers || [])) {
-      // Skip users who haven't completed any days yet (they're handled by the webhook)
-      if (user.Day_Completed === 0) continue;
-      
-      // Check if we should send next day's modules
-      const [nextDay, nextModule] = (user.Next_Module || '').split('_').map(Number);
-      
-      // Only process if it's the first module of a new day
-      if (nextModule === 1) {
-        await sendNewDayMessage(user.Phone, user.Name, user.Topic, nextDay);
-        await sendNextModuleForUser(user.Phone);
-      }
-    }
-    
-  } catch (error) {
-    console.error('Error in daily module scheduler:', error);
-  }
-}
+console.log('Daily scheduler started. Will run tasks every minute.');
 
-// Send new day welcome message
-async function sendNewDayMessage(phone, name, topic, day) {
-  try {
-    const userName = name || 'there';
-    const courseTopic = topic || 'your course';
-    
-    let message = '';
-    if (day === 2) {
-      message = `Good morning, ${userName}! 🌞\n\nWelcome to Day 2 of your course on *${courseTopic}*!\n\nReady to continue your learning journey? Today we'll dive deeper into new concepts and skills. Let's get started with your first module for today!`;
-    } else if (day === 3) {
-      message = `Good morning, ${userName}! 🌞\n\nWelcome to the final day of your course on *${courseTopic}*!\n\nToday, we'll consolidate what you've learned and explore advanced concepts. Let's make the most of your final day!`;
-    }
-    
-    if (message) {
-      await sendWhatsAppMessage(phone, message);
-    }
-    
-  } catch (error) {
-    console.error(`Error sending new day message to ${phone}:`, error);
-  }
-}
-
-// Send next module for a specific user
-async function sendNextModuleForUser(phone) {
-  try {
-    // Fetch user progress data
-    const { data: userData, error } = await supabase
-      .from('user_inputs')
-      .select('Next_Module, Course_Completed')
-      .eq('Phone', phone)
-      .single();
-      
-    if (error || !userData) {
-      console.error(`Error fetching user progress data for ${phone}:`, error);
-      return;
-    }
-    
-    if (userData.Course_Completed) {
-      console.log(`Course already completed for ${phone}`);
-      return;
-    }
-    
-    if (!userData.Next_Module) {
-      console.error(`No next module found for ${phone}`);
-      return;
-    }
-    
-    // Parse day and module
-    const [day, module] = userData.Next_Module.split('_').map(Number);
-    
-    // Fetch module content
-    const { data: moduleData, error: moduleError } = await supabase
-      .from('course_modules')
-      .select('module_content, module_id')
-      .eq('whatsapp_number', phone)
-      .eq('day', day)
-      .eq('module_number', module)
-      .single();
-      
-    if (moduleError || !moduleData) {
-      console.error(`Error fetching module content for ${phone}:`, moduleError);
-      return;
-    }
-    
-    // Construct module message
-    const moduleMessage = `*Day ${day} - Module ${module}*\n\n${moduleData.module_content}`;
-    
-    // Send module content
-    await sendWhatsAppMessage(phone, moduleMessage);
-    
-    // Send completion button
-    await sendCompletionButton(phone, `Click the button when you've completed Day ${day} - Module ${module}`);
-    
-    // Update last message timestamp
-    await supabase
-      .from('user_inputs')
-      .update({ "Last_Msg": new Date().toISOString() })
-      .eq('Phone', phone);
-    
-  } catch (error) {
-    console.error(`Error sending next module for ${phone}:`, error);
-  }
-}
-
-// Helper function to send WhatsApp message via WATI API
-async function sendWhatsAppMessage(phone, message) {
-  try {
-    const response = await fetch(`${watiBaseUrl}/api/v1/sendSessionMessage/${phone}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${watiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messageText: message
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`WATI API error: ${response.status} ${response.statusText}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error sending WhatsApp message:', error);
-    throw error;
-  }
-}
-
-// Send module completion button
-async function sendCompletionButton(phone, message) {
-  try {
-    const response = await fetch(`${watiBaseUrl}/api/v1/sendInteractiveButtonsMessage/${phone}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${watiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messageText: message,
-        buttons: [
-          {
-            text: "Module Completed!",
-            id: "module_complete"
-          }
-        ]
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`WATI API error: ${response.status} ${response.statusText}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error sending completion button:', error);
-    throw error;
-  }
-}
-
-// Execute the scheduler if running directly
-if (require.main === module) {
-  console.log('Running scheduler manually...');
-  sendDailyModules().then(() => {
-    console.log('Manual execution completed');
+// For manual testing (optional)
+if (require.main === module && process.argv.includes('--manual')) {
+  console.log('[Scheduler] Running scheduler manually...');
+  runScheduledTasks().then(() => {
+    console.log('[Scheduler] Manual execution completed.');
   }).catch(error => {
-    console.error('Error during manual execution:', error);
+    console.error('[Scheduler] Error during manual execution:', error);
   });
 }
-
-module.exports = { sendDailyModules };
