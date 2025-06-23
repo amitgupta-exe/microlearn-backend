@@ -517,7 +517,7 @@ async function runScheduledTasks() {
 }
 
 // Schedule task to run every minute
-cron.schedule('* * * * *', () => {
+cron.schedule('* * * *', () => {
   console.log('[Scheduler] Cron job triggered (every minute).');
   runScheduledTasks();
 });
