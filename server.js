@@ -516,20 +516,20 @@ async function runScheduledTasks() {
   console.log(`[Scheduler] Tasks completed at ${new Date().toISOString()}`);
 }
 
-// Schedule task to run every minute
-cron.schedule('* * * *', () => {
-  console.log('[Scheduler] Cron job triggered (every minute).');
-  runScheduledTasks();
-});
+// // Schedule task to run every minute
+// cron.schedule('* * * *', () => {
+//   console.log('[Scheduler] Cron job triggered (every minute).');
+//   runScheduledTasks();
+// });
 
-console.log('Daily scheduler started. Will run tasks every minute.');
+// console.log('Daily scheduler started. Will run tasks every minute.');
 
-// For manual testing (optional)
-if (require.main === module && process.argv.includes('--manual')) {
-  console.log('[Scheduler] Running scheduler manually...');
-  runScheduledTasks().then(() => {
-    console.log('[Scheduler] Manual execution completed.');
-  }).catch(error => {
-    console.error('[Scheduler] Error during manual execution:', error);
-  });
-}
+// // For manual testing (optional)
+// if (require.main === module && process.argv.includes('--manual')) {
+//   console.log('[Scheduler] Running scheduler manually...');
+//   runScheduledTasks().then(() => {
+//     console.log('[Scheduler] Manual execution completed.');
+//   }).catch(error => {
+//     console.error('[Scheduler] Error during manual execution:', error);
+//   });
+// }
