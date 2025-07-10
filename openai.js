@@ -3,15 +3,30 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export async function generateCourseWithOpenAI(reg) {
+export async function generateCourseWithOpenAI(reg, extracted_pdf_text = null) {
   const { style, goal, topic, language } = reg;
   const endpoint = process.env["AZURE_OPENAI_ENDPOINT"] || "https://cop-test.openai.azure.com/";
   const apiKey = process.env["AZURE_OPENAI_API_KEY"] || "<REPLACE_WITH_YOUR_KEY_VALUE_HERE>";
   const apiVersion = "2025-01-01-preview";
   const deployment = "o1-mini"; // This must match your deployment name
 
-  const prompt = `
-Create a personalized 3-day micro-course on "${topic}" in "${language}", using the teaching style of "${style}", designed to be delivered via WhatsApp. The course should help the learner achieve their goal: "${goal}".
+  // Create the base prompt
+  let prompt = `
+Create a personalized 3-day micro-course on "${topic}" in "${language}", using the teaching style of "${style}", designed to be delivered via WhatsApp. The course should help the learner achieve their goal: "${goal}".`;
+
+  // Add PDF content if provided
+  if (extracted_pdf_text) {
+    prompt += `
+
+Additional Context:
+Use the following extracted PDF content as reference material to enhance the course content and ensure accuracy:
+
+${extracted_pdf_text}
+
+Please incorporate relevant information from this content into the course modules where appropriate.`;
+  }
+
+  prompt += `
 
 Guidelines:
 

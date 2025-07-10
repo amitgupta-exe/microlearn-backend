@@ -33,6 +33,22 @@ const client = new AzureOpenAI({
 
 const userSessions = new Map();
 
+
+app.post('/generate-course', async (req, res) => {
+    try {
+        // Accept registration data and extracted_pdf_text from request body
+        const { extracted_pdf_text, ...reg } = req.body;
+        if (!extracted_pdf_text) {
+            return res.status(400).json({ error: 'Missing required field: extracted_pdf_text' });
+        }
+        const courseText = await generateCourseWithOpenAI(reg, extracted_pdf_text);
+        res.status(200).json({ text: courseText });
+    } catch (error) {
+        console.error('[POST /generate-course] Error:', error);
+        res.status(500).json({ error: 'Failed to generate course' });
+    }
+});
+
 app.post('/wati-webhook', async (req, res) => {
     // --- LOG EVERY INCOMING WEBHOOK ---
     console.log('--- Incoming Webhook ---');
@@ -272,6 +288,7 @@ app.post('/wati-webhook', async (req, res) => {
                             { type: "reply", title: "No", id: "continue_old" }
                         ]
                     );
+
                     return res.status(200).json({ status: 'pending', message: 'User prompted to suspend previous course.' });
                 }
 
@@ -287,6 +304,19 @@ app.post('/wati-webhook', async (req, res) => {
                     last_module_completed_at: new Date()
                 }]);
 
+                // Before creating new course_progress, suspend all previous active courses for this phone number (normalized)
+                const normalizedPhone = normalizePhoneNumber(phoneNumber);
+                const { error: suspendError } = await supabase
+                    .from('course_progress')
+                    .update({ status: 'suspended' })
+                    .eq('phone_number', normalizedPhone)
+                    .in('status', ['assigned', 'started']);
+                if (suspendError) {
+                    console.error(`[Webhook] Error suspending previous courses for ${normalizedPhone}:`, suspendError);
+                    return res.status(500).json({ status: 'error', message: 'Failed to suspend previous courses.' });
+                }
+
+
                 userSessions.delete(phoneNumber);
                 await sendInteractiveButtonsMessage(
                     phoneNumber,
@@ -294,6 +324,26 @@ app.post('/wati-webhook', async (req, res) => {
                     "Press Start Learning to begin your first module.",
                     [{ type: "reply", title: "Start Learning", id: "start_learning" }]
                 );
+
+                // Insert user only if not already present
+                const { data: existingUser, error: userLookupError } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('phone', normalizePhoneNumber(phoneNumber))
+                    .maybeSingle();
+
+                if (!existingUser && !userLookupError) {
+                    await supabase.from('users')
+                        .insert([
+                            { 
+                                phone: normalizePhoneNumber(phoneNumber),
+                                name: result.reg.name,
+                                email: null,
+                                role: 'learner'
+                            }
+                        ]);
+                }
+
                 return res.status(200).json({ status: 'success', message: 'Registration complete, course generated.' });
             }
             return res.status(200).json({ status: 'success', message: 'Processing registration.' });
@@ -395,7 +445,7 @@ app.post('/wati-webhook', async (req, res) => {
                     // Final outro for course completion
                     await sendWhatsAppMessage(
                         phoneNumber,
-                        `🎉 Congratulations! You have completed your course. You'll receive your certificate shortly.`
+                        `🎉 Congratulations! You have completed your course.`
                     );
                     return res.status(200).json({ status: 'success', message: 'Course completed, outro sent.' });
                 } else {
@@ -516,20 +566,20 @@ async function runScheduledTasks() {
   console.log(`[Scheduler] Tasks completed at ${new Date().toISOString()}`);
 }
 
-// Schedule task to run every minute
-cron.schedule('* * * * *', () => {
-  console.log('[Scheduler] Cron job triggered (every minute).');
-  runScheduledTasks();
-});
+// // Schedule task to run every minute
+// cron.schedule('* * * * *', () => {
+//   console.log('[Scheduler] Cron job triggered (every minute).');
+//   runScheduledTasks();
+// });
 
-console.log('Daily scheduler started. Will run tasks every minute.');
+// console.log('Daily scheduler started. Will run tasks every minute.');
 
-// For manual testing (optional)
-if (require.main === module && process.argv.includes('--manual')) {
-  console.log('[Scheduler] Running scheduler manually...');
-  runScheduledTasks().then(() => {
-    console.log('[Scheduler] Manual execution completed.');
-  }).catch(error => {
-    console.error('[Scheduler] Error during manual execution:', error);
-  });
-}
+// // For manual testing (optional)
+// if (require.main === module && process.argv.includes('--manual')) {
+//   console.log('[Scheduler] Running scheduler manually...');
+//   runScheduledTasks().then(() => {
+//     console.log('[Scheduler] Manual execution completed.');
+//   }).catch(error => {
+//     console.error('[Scheduler] Error during manual execution:', error);
+//   });
+// }
