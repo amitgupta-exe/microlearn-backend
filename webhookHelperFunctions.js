@@ -73,7 +73,7 @@ function normalizePhoneNumber(input) {
 }
 
 
-
+//extract user reply
 //made to handle session problem of sending rapid sequent messagees without waiting. the issue is because the payload for interactive message is in different format
 function extractUserReply(payload) {
     // WATI interactive button reply (common)
