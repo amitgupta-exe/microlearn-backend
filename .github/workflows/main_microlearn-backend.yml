@@ -1,12 +1,14 @@
-name: Deploy to Azure App Service
+name: Deploy to Azure App Service - DISABLED
 
+# Temporarily disabled - use fixed-azure-deploy.yml instead
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
+  # pull_request:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Manual trigger only
 
 env:
   AZURE_WEBAPP_NAME: microlearn-backend    # Replace with your app name
