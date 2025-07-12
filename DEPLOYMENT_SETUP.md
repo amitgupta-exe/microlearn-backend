@@ -1,8 +1,19 @@
 # Deployment Setup Guide
 
 ## Files Created:
-- `.github/workflows/azure-deploy.yml` - GitHub Actions workflow
+- `.github/workflows/main_microlearn-backend.yml` - GitHub Actions workflow (updated)
 - `azure-pipelines.yml` - Azure DevOps pipeline
+- `web.config` - Azure App Service configuration
+- `process.json` - Process management
+- `.deployment` - Azure deployment configuration
+
+## Recent Fixes Applied:
+1. **Updated GitHub Actions workflow** to use latest azure/webapps-deploy@v3
+2. **Added health check endpoints** at `/` and `/health`
+3. **Improved error handling** with graceful shutdown
+4. **Added web.config** for proper Node.js handling in Azure
+5. **Fixed npm installation** to include all dependencies
+6. **Added engine specifications** in package.json
 
 ## Setup Instructions:
 
@@ -76,9 +87,54 @@
 2. Check the Actions/Pipelines tab to see the deployment progress
 3. Once deployed, your app will be available at: `https://your-app-name.azurewebsites.net`
 
-## Troubleshooting:
+## Troubleshooting Common Azure Deployment Issues:
 
-- Check the deployment logs in GitHub Actions or Azure DevOps
-- Verify all environment variables are set correctly in Azure
-- Ensure your `package.json` has all required dependencies
-- Check Azure App Service logs for runtime errors
+### 1. **Application Error / 500 Internal Server Error:**
+- Check Azure App Service logs: `Diagnose and solve problems` → `Application Logs`
+- Verify all environment variables are set correctly
+- Ensure Node.js version matches (18.x)
+
+### 2. **Module Not Found Errors:**
+- Ensure `package.json` includes all dependencies
+- Check if `npm ci` completed successfully in deployment logs
+- Verify Node.js version compatibility
+
+### 3. **Database Connection Issues:**
+- Verify `SUPABASE_URL` and `SUPABASE_KEY` environment variables
+- Check if `SUPABASE_SERVICE_KEY` is set for backend operations
+- Test database connectivity from Azure
+
+### 4. **OpenAI API Issues:**
+- Confirm `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_KEY` are correct
+- Ensure Azure OpenAI resource is properly configured
+- Check API quotas and limits
+
+### 5. **WhatsApp/WATI Integration:**
+- Verify `WATI_API_TOKEN` and `WATI_API_URL` are set
+- Update webhook URL in WATI dashboard to your Azure app URL
+- Test webhook endpoint: `https://your-app.azurewebsites.net/wati-webhook`
+
+### 6. **Deployment Logs Show Build Errors:**
+```bash
+# Common fixes in GitHub Actions:
+- Ensure publish profile is correctly added as secret
+- Check app name matches Azure App Service name
+- Verify resource group and subscription are correct
+```
+
+### 7. **App Service Won't Start:**
+- Check startup command is set to `node server.js`
+- Verify PORT environment variable (should auto-detect)
+- Check if process is binding to correct port (`process.env.PORT`)
+
+## Testing Your Deployment:
+
+1. **Health Check:** Visit `https://your-app.azurewebsites.net/health`
+2. **API Test:** POST to `https://your-app.azurewebsites.net/generate-course`
+3. **Webhook Test:** Send test message through WATI
+
+## Emergency Rollback:
+If deployment fails, you can quickly rollback:
+1. Go to Azure Portal → Your App Service
+2. Deployment Center → Deployment History
+3. Click "Redeploy" on the last working version

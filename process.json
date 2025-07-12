@@ -1,0 +1,7 @@
+{
+  "name": "microlearn-backend",
+  "script": "server.js",
+  "env": {
+    "NODE_ENV": "production"
+  }
+}

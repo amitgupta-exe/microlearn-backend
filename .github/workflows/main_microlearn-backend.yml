@@ -31,7 +31,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        npm ci --only=production
+        npm ci
 
     - name: Build application (if needed)
       run: |
@@ -39,19 +39,12 @@ jobs:
         # npm run build
         echo "No build step required for this Node.js app"
 
-    - name: Create startup script
-      run: |
-        echo "#!/bin/bash" > startup.sh
-        echo "node server.js" >> startup.sh
-        chmod +x startup.sh
-
     - name: 'Deploy to Azure WebApp'
-      uses: azure/webapps-deploy@v2
+      uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: .
-        startup-command: 'node server.js'
+        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
 
     - name: 'Deployment completed'
       run: echo "Deployment to Azure App Service completed successfully"
