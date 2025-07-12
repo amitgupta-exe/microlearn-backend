@@ -498,10 +498,15 @@ const server = app.listen(PORT, () => {
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 
     // Keep Azure happy with periodic output
-    setInterval(() => {
-        console.log(`[Heartbeat] Server alive at ${new Date().toISOString()}`);
-    }, 30000); // Log every 30 seconds
-    
+    // setInterval(() => {
+    //     console.log(`[Heartbeat] Server alive at ${new Date().toISOString()}`);
+    // }, 30000); // Log every 30 seconds
+
+    setTimeout(() => {
+        console.log("first output");
+        
+    }, 30000);
+
 });
 
 // Graceful shutdown
