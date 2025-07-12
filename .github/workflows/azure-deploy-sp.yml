@@ -1,12 +1,15 @@
-name: Deploy to Azure with Service Principal
+name: Deploy to Azure with Service Principal - DISABLED
 
+# DISABLED - This workflow requires AZURE_CREDENTIALS secret
+# Use deploy-simple.yml instead
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
+  # pull_request:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Manual trigger only for testing
 
 env:
   AZURE_WEBAPP_NAME: microlearn-backend    # Replace with your app name

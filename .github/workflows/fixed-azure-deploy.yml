@@ -1,10 +1,11 @@
-name: Fixed Azure Deployment
+name: Fixed Azure Deployment - DISABLED
 
+# DISABLED - Use deploy-simple.yml instead
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:  # Allow manual trigger
+  # push:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Manual trigger only
 
 env:
   AZURE_WEBAPP_NAME: microlearn-backend

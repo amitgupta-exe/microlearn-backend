@@ -1,0 +1,61 @@
+name: Deploy to Azure - Publish Profile Only
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  AZURE_WEBAPP_NAME: microlearn-backend
+  NODE_VERSION: '18.x'
+
+jobs:
+  deploy:
+    name: Deploy to Azure App Service
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 'Checkout code'
+      uses: actions/checkout@v4
+
+    - name: 'Setup Node.js'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: 'Install dependencies'
+      run: npm ci
+
+    - name: 'Verify publish profile secret'
+      run: |
+        if [ -z "$PUBLISH_PROFILE" ]; then
+          echo "❌ ERROR: AZURE_WEBAPP_PUBLISH_PROFILE secret is missing!"
+          echo ""
+          echo "To fix this:"
+          echo "1. Go to Azure Portal → Your App Service → Get publish profile"
+          echo "2. Download the .PublishSettings file"
+          echo "3. Copy ALL content from the file"
+          echo "4. Go to GitHub → Settings → Secrets and variables → Actions"
+          echo "5. Create new secret: AZURE_WEBAPP_PUBLISH_PROFILE"
+          echo "6. Paste the entire XML content as the value"
+          exit 1
+        else
+          echo "✅ Publish profile secret is present"
+          echo "Secret length: ${#PUBLISH_PROFILE} characters"
+        fi
+      env:
+        PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+
+    - name: 'Deploy to Azure App Service'
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: '.'
+
+    - name: 'Deployment completed'
+      run: |
+        echo "🎉 Deployment completed successfully!"
+        echo "Your app should be available at: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
