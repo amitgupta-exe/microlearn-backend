@@ -1,23 +1,27 @@
 # Deployment Setup Guide
 
 ## Files Created:
-- `.github/workflows/main_microlearn-backend.yml` - GitHub Actions workflow (updated)
+- `.github/workflows/main_microlearn-backend.yml` - GitHub Actions workflow (Publish Profile method)
+- `.github/workflows/azure-deploy-sp.yml` - GitHub Actions workflow (Service Principal method)
 - `azure-pipelines.yml` - Azure DevOps pipeline
 - `web.config` - Azure App Service configuration
 - `process.json` - Process management
 - `.deployment` - Azure deployment configuration
 
 ## Recent Fixes Applied:
-1. **Updated GitHub Actions workflow** to use latest azure/webapps-deploy@v3
-2. **Added health check endpoints** at `/` and `/health`
-3. **Improved error handling** with graceful shutdown
-4. **Added web.config** for proper Node.js handling in Azure
-5. **Fixed npm installation** to include all dependencies
-6. **Added engine specifications** in package.json
+1. **Fixed Azure authentication error** by reverting to azure/webapps-deploy@v2 with publish profile
+2. **Added alternative Service Principal workflow** for advanced authentication
+3. **Added health check endpoints** at `/` and `/health`
+4. **Improved error handling** with graceful shutdown
+5. **Added web.config** for proper Node.js handling in Azure
+6. **Fixed npm installation** to include all dependencies
+7. **Added engine specifications** in package.json
 
 ## Setup Instructions:
 
 ### For GitHub Actions Deployment:
+
+**Method 1: Using Publish Profile (Recommended - Simpler Setup)**
 
 1. **Create Azure App Service:**
    - Go to Azure Portal
@@ -37,6 +41,26 @@
    - Name: `AZURE_WEBAPP_PUBLISH_PROFILE`
    - Value: Paste the entire publish profile content
 
+4. **Use the main workflow:** The `main_microlearn-backend.yml` workflow will automatically deploy when you push to main.
+
+**Method 2: Using Service Principal (Advanced)**
+
+1. **Create Service Principal:**
+   ```bash
+   az ad sp create-for-rbac --name "microlearn-backend-sp" --role contributor \
+     --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group} \
+     --sdk-auth
+   ```
+
+2. **Add Azure Credentials Secret:**
+   - Copy the entire JSON output from the above command
+   - Go to GitHub repository → Settings → Secrets and Variables → Actions
+   - Create secret named `AZURE_CREDENTIALS`
+   - Paste the JSON as the value
+
+3. **Use the Service Principal workflow:** Rename `azure-deploy-sp.yml` to `main_microlearn-backend.yml` to use this method.
+
+4. **Configure Environment Variables in Azure:**
 4. **Configure Environment Variables in Azure:**
    - Go to your App Service in Azure Portal
    - Configuration → Application settings
@@ -114,7 +138,17 @@
 - Update webhook URL in WATI dashboard to your Azure app URL
 - Test webhook endpoint: `https://your-app.azurewebsites.net/wati-webhook`
 
-### 6. **Deployment Logs Show Build Errors:**
+### 6. **GitHub Actions Authentication Errors:**
+```
+Error: No credentials found. Add an Azure login action before this action.
+```
+**Solutions:**
+- **For Publish Profile method:** Ensure `AZURE_WEBAPP_PUBLISH_PROFILE` secret is correctly set
+- **For Service Principal method:** Ensure `AZURE_CREDENTIALS` secret contains valid JSON
+- **Check secret name:** Make sure the secret name matches exactly what's in the workflow
+- **Verify workflow file:** Use the correct workflow file for your authentication method
+
+### 7. **Deployment Logs Show Build Errors:**
 ```bash
 # Common fixes in GitHub Actions:
 - Ensure publish profile is correctly added as secret

@@ -1,0 +1,41 @@
+name: Debug Deployment
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+env:
+  AZURE_WEBAPP_NAME: microlearn-backend
+
+jobs:
+  debug:
+    name: Debug Secrets and Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v4
+      
+    - name: 'Check if publish profile secret exists'
+      run: |
+        if [ -z "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}" ]; then
+          echo "❌ AZURE_WEBAPP_PUBLISH_PROFILE secret is NOT set"
+          echo "Please add this secret in GitHub repository settings"
+        else
+          echo "✅ AZURE_WEBAPP_PUBLISH_PROFILE secret exists"
+          echo "Secret length: ${#AZURE_WEBAPP_PUBLISH_PROFILE}"
+        fi
+      env:
+        AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        
+    - name: 'List GitHub secrets (names only)'
+      run: |
+        echo "Available secrets in this repository:"
+        echo "Note: This only shows if secrets are set, not their values"
+        
+    - name: 'Test Azure WebApp Deploy with dry run'
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: .
+      continue-on-error: true
