@@ -1,9 +1,9 @@
-import { AzureOpenAI } from "openai";
-import dotenv from "dotenv";
+const { AzureOpenAI } = require("openai");
+const dotenv = require("dotenv");
 
 dotenv.config();
 
-export async function generateCourseWithOpenAI(reg, extracted_pdf_text = null) {
+async function generateCourseWithOpenAI(reg, extracted_pdf_text = null) {
   const { style, goal, topic, language } = reg;
   const endpoint = process.env["AZURE_OPENAI_ENDPOINT"] || "https://cop-test.openai.azure.com/";
   const apiKey = process.env["AZURE_OPENAI_API_KEY"] || "<REPLACE_WITH_YOUR_KEY_VALUE_HERE>";
@@ -102,4 +102,8 @@ Important Output Instructions:
   // Extract and return only the JSON content from the response
   return result.choices[0].message.content;
 }
+
+module.exports = {
+  generateCourseWithOpenAI
+};
 
