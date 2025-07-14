@@ -59,4 +59,4 @@ jobs:
           app-name: 'microlearn-backend'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_100389C0F0AE4812B10C5A9D3C363D80 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_950CB645C6824CB290C1BA9516A29D99 }}
