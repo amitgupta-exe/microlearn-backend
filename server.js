@@ -4,7 +4,25 @@ const { createClient } = require('@supabase/supabase-js');
 const { AzureOpenAI } = require('openai');
 const { v4: uuidv4 } = require('uuid');
 const app = express();
+const cors = require('cors');
+
+
+// CORS configuration
+const corsOptions = {
+  origin: [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'https://your-frontend-domain.com' // Add your production frontend URL
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 require('dotenv').config();
 
@@ -31,10 +49,12 @@ const client = new AzureOpenAI({
     apiKey: subscriptionKey,
 });
 
+
+
 const userSessions = new Map();
 
 
-app.post('/generate-course', async (req, res) => {
+app.post('/api/generate-course', async (req, res) => {
     try {
         // Accept registration data and extracted_pdf_text from request body
         const { extracted_pdf_text, ...reg } = req.body;
