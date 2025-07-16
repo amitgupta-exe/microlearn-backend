@@ -12,7 +12,7 @@ const corsOptions = {
   origin: [
     'http://localhost:8080',
     'http://localhost:3000',
-    'https://your-frontend-domain.com' // Add your production frontend URL
+    'https://microlearn-blond.vercel.app' // Add your production frontend URL
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -516,17 +516,6 @@ const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-
-    // Keep Azure happy with periodic output
-    // setInterval(() => {
-    //     console.log(`[Heartbeat] Server alive at ${new Date().toISOString()}`);
-    // }, 30000); // Log every 30 seconds
-
-    setTimeout(() => {
-        console.log("first output");
-        
-    }, 30000);
-
 });
 
 // Graceful shutdown
@@ -546,10 +535,6 @@ process.on('SIGINT', () => {
 
 
 
-// // Supabase setup
-// const supabaseUrl = process.env.SUPABASE_URL;
-// const supabaseKey = process.env.SUPABASE_SERVICE_KEY; // Corrected to SERVICE_KEY
-// const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MAX_COURSE_DAYS = 3;
 const NEXT_DAY_START_HOUR = 10; // 10 AM server time
@@ -630,20 +615,20 @@ async function runScheduledTasks() {
     console.log(`[Scheduler] Tasks completed at ${new Date().toISOString()}`);
 }
 
-// // Schedule task to run every minute
-// cron.schedule('* * * * *', () => {
-//   console.log('[Scheduler] Cron job triggered (every minute).');
-//   runScheduledTasks();
-// });
+// Schedule task to run every minute
+cron.schedule('0 10 * * *', () => {
+  console.log('[Scheduler] Cron job triggered (every minute).');
+  runScheduledTasks();
+});
 
-// console.log('Daily scheduler started. Will run tasks every minute.');
+console.log('Daily scheduler started. Will run tasks every minute.');
 
-// // For manual testing (optional)
-// if (require.main === module && process.argv.includes('--manual')) {
-//   console.log('[Scheduler] Running scheduler manually...');
-//   runScheduledTasks().then(() => {
-//     console.log('[Scheduler] Manual execution completed.');
-//   }).catch(error => {
-//     console.error('[Scheduler] Error during manual execution:', error);
-//   });
-// }
+// For manual testing (optional)
+if (require.main === module && process.argv.includes('--manual')) {
+  console.log('[Scheduler] Running scheduler manually...');
+  runScheduledTasks().then(() => {
+    console.log('[Scheduler] Manual execution completed.');
+  }).catch(error => {
+    console.error('[Scheduler] Error during manual execution:', error);
+  });
+}
