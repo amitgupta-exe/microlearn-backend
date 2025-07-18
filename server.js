@@ -369,7 +369,7 @@ app.post('/wati-webhook', async (req, res) => {
             const { data: progressEntry, error: progressError } = await supabase
                 .from('course_progress')
                 .select('status')
-                .eq('phone_number', phoneNumber)
+                .eq('phone_number', normalizePhoneNumber(phoneNumber))
                 .in('status', ['assigned', 'started'])
                 .maybeSingle();
 
