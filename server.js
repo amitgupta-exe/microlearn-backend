@@ -375,8 +375,9 @@ app.post('/wati-webhook', async (req, res) => {
                 .from('course_progress')
                 .select('status')
                 .eq('phone_number', phoneNumber)
-                .in('status', ['assigned', 'started'])
+                .in('status', ['assigned', 'started', 'suspended'])
                 .maybeSingle();
+
 
             if (progressError || !progressEntry) {
                 await sendWhatsAppMessage(phoneNumber, "It seems you're not registered for a course yet. Type 'microlearn' to begin.");
