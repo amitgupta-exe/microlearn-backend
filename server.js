@@ -338,7 +338,12 @@ app.post('/wati-webhook', async (req, res) => {
 
 
                 userSessions.delete(phoneNumber);
-                await sendWhatsAppMessage(phoneNumber, "Your course is generated, you will recieve the modules once the course is apporved.");
+                await sendInteractiveButtonsMessage(
+                    phoneNumber,
+                    "Your course is ready!", // header <= 60 chars
+                    "Press Start Learning to begin your first module.",
+                    [{ type: "reply", title: "Start Learning", id: "start_learning" }]
+                );
 
                 // Insert user only if not already present
                 const { data: existingUser, error: userLookupError } = await supabase
@@ -369,7 +374,7 @@ app.post('/wati-webhook', async (req, res) => {
             const { data: progressEntry, error: progressError } = await supabase
                 .from('course_progress')
                 .select('status')
-                .eq('phone_number', normalizePhoneNumber(phoneNumber))
+                .eq('phone_number', phoneNumber)
                 .in('status', ['assigned', 'started'])
                 .maybeSingle();
 
